@@ -312,9 +312,9 @@ def sync_playlist(url):
         if failed:
             print(f"\n{failed} songs failed. Run again to retry them.")
 
-    # ---- 3. renumber everything, same order logic as before ('::-1'):
-    #         reversed playlist, so 001 is the song at the bottom of the playlist
-    order = [e['id'] for e in reversed(entries) if e['id'] in state]
+    # ---- 3. renumber everything: 001 is the newest song (top of the playlist),
+    #         and numbers increase going down toward the oldest song
+    order = [e['id'] for e in entries if e['id'] in state]
     changed = renumber(playlist_dir, state, order)
     save_json(state_path, state)
 
