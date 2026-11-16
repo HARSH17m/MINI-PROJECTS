@@ -34,7 +34,7 @@ A collection of small, practical Python tools I built for my own daily use: down
 
 ## 🎵 Music Downloader: version history
 
-All versions save to a local folder (`D:\Youtube_Downs` by default) and log every URL you enter in `links.txt`.
+All versions save to a local folder (`D:\Youtube_Downs` by default) and log every URL you enter in `links.txt` and downloaded over 784+ `songs` yet.
 
 ### v1.0: The beginning
 - Menu: single video or playlist.
