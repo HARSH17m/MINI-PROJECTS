@@ -8,6 +8,12 @@ from datetime import datetime
 import yt_dlp
 from yt_dlp.utils import sanitize_filename
 
+from mutagen.easyid3 import EasyID3
+from mutagen.id3 import ID3NoHeaderError
+
+import time
+import msvcrt      # Windows: detect key press
+import winsound    # Windows: notification sound
 
 BASE_DIR = r'D:\Youtube_Downs'
 AUDIO_QUALITY = '192'   # kbps
@@ -223,7 +229,82 @@ def renumber(playlist_dir, state, order):
     return len(plan)
 
 
+def tag_songs(playlist_dir, state, order):
+    """Write '001 - Name' into the title tag and the track number, so
+    phone players show the same numbering as the filenames."""
+    for n, vid in enumerate(order, start=1):
+        path = os.path.join(playlist_dir, state[vid]['file'])
+        wanted = f"{n:03d} - {state[vid]['name']}"
+
+        try:
+            try:
+                tags = EasyID3(path)
+            except ID3NoHeaderError:
+                tags = EasyID3()
+
+            # skip files that are already correct
+            if (tags.get('title', [''])[0] == wanted
+                    and tags.get('tracknumber', [''])[0] == str(n)):
+                continue
+
+            tags['title'] = wanted
+            tags['tracknumber'] = str(n)
+            tags.save(path)
+
+        except Exception as e:
+            print(f"   could not tag {state[vid]['file']}: {e}")
+            
+
+def format_time(seconds):
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}h {m}m {s}s"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
+def notify():
+    """Short three-tone chime."""
+    try:
+        for freq, dur in ((880, 150), (1100, 150), (1320, 350)):
+            winsound.Beep(freq, dur)
+    except Exception:
+        print('\a')
+
+
+def show_summary(title, downloaded, failed, removed, total, elapsed, folder):
+    os.system('cls')
+
+    print("=" * 44)
+    print("            SYNC COMPLETE")
+    print("=" * 44)
+    print(f"  Playlist   : {title}")
+    print(f"  Downloaded : {downloaded}")
+    print(f"  Failed     : {failed}")
+    print(f"  Removed    : {removed}")
+    print(f"  Total songs: {total}")
+    print(f"  Time taken : {format_time(elapsed)}")
+    print(f"  Folder     : {folder}")
+    if failed:
+        print("\n  Some songs failed. Run option 2 again to retry them.")
+    print("=" * 44)
+
+    notify()
+
+    # discard any keys pressed while downloading, so it doesn't close instantly
+    while msvcrt.kbhit():
+        msvcrt.getch()
+
+    print("\nPress any key to exit...")
+    msvcrt.getch()
+
+
 def sync_playlist(url):
+    start_time = time.time()
+    downloaded = 0
+    failed = 0
     print("Reading playlist online...")
     playlist_id, title, entries = get_playlist(url)
 
@@ -286,7 +367,7 @@ def sync_playlist(url):
 
         print(f"\nDownloading {len(new_songs)} new songs...\n")
         done = 0
-        failed = 0
+        dl_start = time.time()
 
         with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
             futures = [pool.submit(download_one, e, staging) for e in new_songs]
@@ -295,16 +376,19 @@ def sync_playlist(url):
                 vid, song_title = future.result()
                 done += 1
 
+                eta = (time.time() - dl_start) / done * (len(new_songs) - done)
+
                 if song_title:
+                    downloaded += 1
                     temp_name = f"~{vid}.mp3"
                     shutil.move(os.path.join(staging, f"{vid}.mp3"),
                                 os.path.join(playlist_dir, temp_name))
                     state[vid] = {'name': sanitize_filename(song_title),
                                   'file': temp_name}
-                    print(f"[{done}/{len(new_songs)}] {song_title}")
+                    print(f"[{done}/{len(new_songs)}] {song_title}   (ETA {format_time(eta)})")
                 else:
                     failed += 1
-                    print(f"[{done}/{len(new_songs)}] FAILED ({vid})")
+                    print(f"[{done}/{len(new_songs)}] FAILED ({vid})   (ETA {format_time(eta)})")
 
         shutil.rmtree(staging, ignore_errors=True)
         save_json(state_path, state)
@@ -316,10 +400,14 @@ def sync_playlist(url):
     #         and numbers increase going down toward the oldest song
     order = [e['id'] for e in entries if e['id'] in state]
     changed = renumber(playlist_dir, state, order)
+    tag_songs(playlist_dir, state, order)
     save_json(state_path, state)
 
     print(f"\nRenumbered {changed} files. {len(order)} songs in total.")
     print(f"Saved in: {playlist_dir}")
+    
+    show_summary(title, downloaded, failed, len(removed), len(order),
+                 time.time() - start_time, playlist_dir)
 
 
 # ------------------------------------------------------------------ main
